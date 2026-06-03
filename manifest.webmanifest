@@ -1,0 +1,33 @@
+{
+  "name": "麻雀得点計算機",
+  "short_name": "得点計算",
+  "description": "立直麻雀の点数計算機。写真または手入力で手牌を取り込み、和了形の点数と全パターンを列挙します。",
+  "lang": "ja",
+  "dir": "ltr",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": ".",
+  "scope": ".",
+  "theme_color": "#0a6b3b",
+  "background_color": "#0f1410",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

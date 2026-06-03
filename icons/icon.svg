@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="麻雀牌アイコン 萬">
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#0a6b3b"/>
+  <!-- Mahjong tile body -->
+  <g>
+    <rect x="136" y="80" width="240" height="352" rx="40" fill="#f7f4ea" stroke="#d8d2bf" stroke-width="6"/>
+    <!-- Tile inner bevel -->
+    <rect x="156" y="100" width="200" height="312" rx="28" fill="#fffdf6" stroke="#e7e1cd" stroke-width="4"/>
+    <!-- 萬 character -->
+    <text x="256" y="300" font-family="'Hiragino Mincho ProN','Yu Mincho','Songti SC',serif"
+          font-size="220" font-weight="700" fill="#0a6b3b" text-anchor="middle">萬</text>
+  </g>
+</svg>

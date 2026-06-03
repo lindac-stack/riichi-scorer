@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Node (only if tooling is ever added; this is a no-build static site)
+node_modules/
+
+# Logs
+*.log
+
+# Editor
+.vscode/
+
+.playwright-mcp/
+probe.mjs
