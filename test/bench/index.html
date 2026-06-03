@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>Vision 認識精度ベンチ</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 16px; background:#f4f4f4; }
+  canvas { border:1px solid #ccc; background:#fff; image-rendering:auto; }
+  #log { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size:12px; }
+</style>
+</head>
+<body>
+<h1>Vision 認識精度ベンチ</h1>
+<canvas id="cv" width="1520" height="640"></canvas>
+<div id="log"></div>
+<script type="module">
+import { recognizeTiles } from '../../js/vision/recognize.js';
+import { allTileTypes, sortTiles, normalize, suitOf, rankOf, isRed } from '../../js/tiles.js';
+
+// tiles.js 表記 -> Unicode 麻雀牌コードポイント
+function tileGlyph(tile) {
+  const t = normalize(tile);
+  const s = suitOf(t), r = rankOf(t);
+  if (s === 'm') return String.fromCodePoint(0x1F007 + (r - 1)); // 1m..9m 萬子
+  if (s === 's') return String.fromCodePoint(0x1F010 + (r - 1)); // 1s..9s 索子
+  if (s === 'p') return String.fromCodePoint(0x1F019 + (r - 1)); // 1p..9p 筒子
+  // 字牌
+  const z = { '1z':0x1F000,'2z':0x1F001,'3z':0x1F002,'4z':0x1F003,
+              '5z':0x1F006,'6z':0x1F005,'7z':0x1F004 };
+  return String.fromCodePoint(z[t]);
+}
+
+// 1枚のタイルを (x,y) に幅wで描画
+function drawTile(ctx, tile, x, y, w) {
+  const h = w * 1.35;
+  // 牌の白背景＋枠
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 2;
+  const r = 6;
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // グリフ
+  ctx.fillStyle = isRed(tile) ? '#d00' : '#111';
+  ctx.font = `${Math.round(h*0.92)}px "Apple Symbols","Segoe UI Symbol","Noto Sans Symbols2",sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(tileGlyph(tile), x + w/2, y + h/2 + h*0.02);
+}
+
+// 牌列 -> dataURL（2x 解像度・2段組で1牌を大きく保つ）
+function drawHand(tiles) {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const S = 2;                 // 解像度スケール
+  ctx.setTransform(S, 0, 0, S, 0, 0);
+  const W = cv.width / S, H = cv.height / S;
+  ctx.fillStyle = '#e8e8e8';
+  ctx.fillRect(0, 0, W, H);
+  const perRow = 7, w = 96, gap = 8, x0 = 12, y0 = 12, rowH = w * 1.35 + 14;
+  tiles.forEach((t, i) => {
+    const r = Math.floor(i / perRow), c = i % perRow;
+    drawTile(ctx, t, x0 + c * (w + gap), y0 + r * rowH, w);
+  });
+  return cv.toDataURL('image/png');
+}
+
+// ランダムな手牌(14枚, 各種4枚まで)を生成
+function genHand(n, seed) {
+  // 簡易 LCG で再現性
+  let s = seed >>> 0;
+  const rnd = () => (s = (s*1664525 + 1013904223) >>> 0) / 4294967296;
+  const types = allTileTypes();
+  const count = {};
+  const hand = [];
+  while (hand.length < n) {
+    const t = types[Math.floor(rnd()*types.length)];
+    count[t] = (count[t]||0);
+    if (count[t] >= 4) continue;
+    count[t]++; hand.push(t);
+  }
+  return sortTiles(hand);
+}
+
+// 認識 vs 正解 を multiset で突き合わせ -> 正しく取れた枚数
+function matchCount(truth, got) {
+  const bag = {};
+  for (const t of truth) bag[t] = (bag[t]||0)+1;
+  let ok = 0;
+  for (const g of got) { if (bag[g] > 0) { bag[g]--; ok++; } }
+  return ok;
+}
+
+// スート別(m/p/s/z)の multiset 一致枚数を返す。
+function matchBySuit(truth, got) {
+  const suit = (t) => normalize(t)[1];
+  const res = { m:{ok:0,n:0}, p:{ok:0,n:0}, s:{ok:0,n:0}, z:{ok:0,n:0} };
+  const bag = {};
+  for (const t of truth) { bag[t]=(bag[t]||0)+1; res[suit(t)].n++; }
+  for (const g of got) { if (bag[g] > 0) { bag[g]--; res[suit(g)].ok++; } }
+  return res;
+}
+
+// 429 等を指数バックオフでリトライ。
+async function recognizeWithRetry(dataUrl, opts, tries = 5) {
+  let wait = 1000;
+  for (let a = 0; a < tries; a++) {
+    try {
+      return await recognizeTiles(dataUrl, opts);
+    } catch (e) {
+      const msg = String(e && e.message || e);
+      const is429 = /HTTP 429/.test(msg);
+      if (!is429 || a === tries - 1) throw e;
+      const m = msg.match(/try again in ([\d.]+)(ms|s)/i);
+      let w = wait;
+      if (m) w = (m[2].toLowerCase() === 's' ? +m[1]*1000 : +m[1]) + 800;
+      await new Promise(r => setTimeout(r, w));
+      wait = Math.min(wait * 2, 20000);
+    }
+  }
+}
+
+// ローカルサーバから API キーを読む（キーをログ/コードに残さない）
+async function loadKey() {
+  const res = await fetch('/.env.local', { cache: 'no-store' });
+  const txt = await res.text();
+  const kv = {};
+  for (const line of txt.split('\n')) {
+    const i = line.indexOf('=');
+    if (i > 0) kv[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return { provider: kv.RIICHI_VISION_PROVIDER || 'openai', key: kv.OPENAI_API_KEY || '' };
+}
+
+// 非同期ベンチ実行。状態は window.__state に蓄積し、ポーリングで進捗を読む。
+async function runBench(n, seedBase, delayMs = 6500) {
+  const { provider, key } = await loadKey();
+  const suitZero = () => ({ m:{ok:0,n:0}, p:{ok:0,n:0}, s:{ok:0,n:0}, z:{ok:0,n:0} });
+  const st = window.__state = { total: n, done: 0, running: true, results: [], error: null,
+                                tilesTruth: 0, tilesOk: 0, exactHands: 0, apiErrors: 0,
+                                bySuit: suitZero(), provider };
+  try {
+    for (let i = 0; i < n; i++) {
+      const seed = (seedBase + i * 7919) >>> 0;
+      const truth = genHand(14, seed);
+      const dataUrl = drawHand(truth);
+      let got = [], raw = '', err = null;
+      try {
+        const r = await recognizeWithRetry(dataUrl, { provider, key });
+        got = r.tiles; raw = r.raw;
+      } catch (e) { err = String(e && e.message || e); st.apiErrors++; }
+      const ok = matchCount(truth, got);
+      const exact = (got.length === truth.length && ok === truth.length);
+      // スート別集計（API エラーの手は集計から除外して精度を汚さない）
+      if (!err) {
+        const bs = matchBySuit(truth, got);
+        for (const s of ['m','p','s','z']) { st.bySuit[s].ok += bs[s].ok; st.bySuit[s].n += bs[s].n; }
+        st.tilesTruth += truth.length;
+        st.tilesOk += ok;
+        if (exact) st.exactHands++;
+      }
+      st.results.push({ i, seed, truth, got: sortTiles(got), ok, n: truth.length, exact, err,
+                        rawLen: raw.length });
+      st.done = i + 1;
+      document.getElementById('log').textContent =
+        `progress ${st.done}/${st.total}  per-tile ${st.tilesOk}/${st.tilesTruth}  exact ${st.exactHands}  apiErr ${st.apiErrors}`;
+      if (i < n - 1) await new Promise(r => setTimeout(r, delayMs));
+    }
+  } catch (e) {
+    st.error = String(e && e.message || e);
+  } finally {
+    st.running = false;
+  }
+  return { done: st.done };
+}
+
+// グローバル公開（Playwright から駆動）
+window.__bench = { drawHand, genHand, recognizeTiles, matchCount, sortTiles, loadKey, runBench };
+window.__ready = true;
+document.getElementById('log').textContent = 'ready';
+</script>
+</body>
+</html>

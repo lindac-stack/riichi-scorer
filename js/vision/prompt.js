@@ -27,9 +27,21 @@ Identify EVERY mahjong tile visible in the image, including tiles in called meld
 
 ${TILE_LEGEND}
 
+How to read each tile (examine tiles ONE AT A TIME, left to right):
+- 萬子 (man, 1m-9m): a kanji number (一二三四五六七八九) above the 萬 character.
+- 筒子 (pin, 1p-9p): COUNT the round circles/dots drawn on the tile — that count IS the number.
+- 索子 (sou, 1s-9s): COUNT the bamboo sticks drawn on the tile — that count IS the number.
+    The 1 of bamboo (1s) is usually drawn as a single bird, not a stick.
+- Count carefully: pin and sou 1-9 differ ONLY by how many circles/sticks are shown.
+
 Rules:
 - Read tiles left-to-right (and include melds set aside to the right).
 - Return one entry per physical tile, in the order they appear.
+- Report EXACTLY what each tile shows. Do NOT assume the hand forms runs or
+  sequences, and do NOT "fix" tiles into a tidy pattern — duplicated or
+  non-sequential tiles are normal and expected.
+- A typical hand has 13 or 14 tiles (plus any called-meld tiles); make your
+  output length match the number of tiles actually visible.
 - Use red-five codes (0m/0p/0s) only when the 5 tile is clearly red.
 - Do NOT guess tiles that are not visible. Do NOT add explanations.
 

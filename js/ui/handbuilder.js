@@ -308,5 +308,12 @@ export function createHandBuilder(root, onCalc) {
 
   renderHand();
 
-  return { state };
+  // 外部（写真認識など）から認識牌を流し込む
+  function loadTiles(tiles) {
+    state.hand = sortTiles(Array.isArray(tiles) ? [...tiles] : []);
+    state.winIndex = -1;
+    renderHand();
+  }
+
+  return { state, loadTiles };
 }

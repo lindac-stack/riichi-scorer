@@ -18,7 +18,7 @@ const DEFAULT_PROVIDER = 'gemini';
 // ---- プロバイダ毎のモデル名（変更しやすいよう定数化）----
 export const MODELS = {
   gemini: 'gemini-2.0-flash',          // 代替: 'gemini-1.5-flash'
-  openai: 'gpt-4o-mini',               // 代替: 'gpt-4o'
+  openai: 'gpt-4.1',                   // bench: gpt-4o-mini 42% → gpt-4o/4.1 ~70%（牌の数え分け）
   anthropic: 'claude-3-5-sonnet-latest', // 代替: 'claude-opus-4-1' 等
 };
 
@@ -197,7 +197,8 @@ async function callOpenAI(parts, key) {
           role: 'user',
           content: [
             { type: 'text', text: RECOGNIZE_PROMPT },
-            { type: 'image_url', image_url: { url: parts.dataUrl } },
+            // detail:'high' で全解像度タイル処理 → 筒子/索子の pip 数え分けが安定する
+            { type: 'image_url', image_url: { url: parts.dataUrl, detail: 'high' } },
           ],
         },
       ],

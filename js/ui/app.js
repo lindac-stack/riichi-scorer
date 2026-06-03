@@ -1,13 +1,10 @@
-// app.js — コントローラ。タブ切替・設定モーダル・手入力/写真フローの結線。
+// app.js — コントローラ。設定モーダル・写真認識→手入力ビルダー→計算 の結線。
 //
 // 設計方針: 採点エンジン(score.js / enumerate.js)と画像認識(vision/*)は
-// 動的 import で読み込み、失敗しても手入力タブが壊れないよう防御的に扱う。
+// 動的 import で読み込み、失敗しても手入力ビルダーが壊れないよう防御的に扱う。
 
 import { createHandBuilder } from './handbuilder.js';
 import { renderScoreResult, renderOutcomesTable } from './result.js';
-import {
-  displayName, sortTiles, parseTileInput, isRed, suitOf,
-} from '../tiles.js';
 
 const LS_PROVIDER = 'riichi_vision_provider';
 const LS_KEY = 'riichi_vision_key';
@@ -38,29 +35,6 @@ async function loadCapture() {
   } catch {
     return {};
   }
-}
-
-// ---------------------------------------------------------------------------
-// タブ切替
-// ---------------------------------------------------------------------------
-function setupTabs() {
-  const tabPhoto = $('#tabPhoto');
-  const tabManual = $('#tabManual');
-  const panelPhoto = $('#panelPhoto');
-  const panelManual = $('#panelManual');
-
-  function select(which) {
-    const photo = which === 'photo';
-    tabPhoto.classList.toggle('is-active', photo);
-    tabManual.classList.toggle('is-active', !photo);
-    tabPhoto.setAttribute('aria-selected', String(photo));
-    tabManual.setAttribute('aria-selected', String(!photo));
-    panelPhoto.hidden = !photo;
-    panelManual.hidden = photo;
-  }
-  tabPhoto.addEventListener('click', () => select('photo'));
-  tabManual.addEventListener('click', () => select('manual'));
-  select('manual');
 }
 
 // ---------------------------------------------------------------------------
@@ -96,11 +70,29 @@ function getVisionConfig() {
 }
 
 // ---------------------------------------------------------------------------
-// 手入力タブ
+// 統合ページ（写真認識 → 手入力ビルダー → 計算 / 全パターン列挙）
 // ---------------------------------------------------------------------------
-function setupManual() {
-  const resultArea = $('#manualResult');
-  createHandBuilder($('#handbuilder'), async (payload) => {
+function setupMain() {
+  const statusEl = $('#photoStatus');
+  const previewWrap = $('#photoPreview');
+  const previewImg = $('#photoImg');
+  const resultArea = $('#result');
+
+  function setStatus(msg, isError) {
+    statusEl.textContent = msg || '';
+    statusEl.classList.toggle('error', !!isError);
+  }
+
+  function showPreview(blobOrUrl) {
+    try {
+      const url = typeof blobOrUrl === 'string' ? blobOrUrl : URL.createObjectURL(blobOrUrl);
+      previewImg.src = url;
+      previewWrap.hidden = false;
+    } catch { /* プレビューは任意 */ }
+  }
+
+  // 手入力ビルダーを1度だけ生成。計算は従来の手入力フローと同じ。
+  const hb = createHandBuilder($('#handbuilder'), async (payload) => {
     resultArea.innerHTML = '<div class="status">計算中…</div>';
 
     if (!payload.winningTile) {
@@ -126,60 +118,8 @@ function setupManual() {
         `<div class="result-error">計算でエラーが発生しました: ${escapeText(e.message)}</div>`;
     }
   });
-}
 
-// ---------------------------------------------------------------------------
-// 写真タブ
-// ---------------------------------------------------------------------------
-function setupPhoto() {
-  const statusEl = $('#photoStatus');
-  const previewWrap = $('#photoPreview');
-  const previewImg = $('#photoImg');
-  const handSection = $('#photoHandSection');
-  const chipsEl = $('#photoHandChips');
-  const resultArea = $('#photoResult');
-
-  // 認識牌（編集可能）の状態
-  const photoState = { tiles: [] };
-
-  function setStatus(msg, isError) {
-    statusEl.textContent = msg || '';
-    statusEl.classList.toggle('error', !!isError);
-  }
-
-  function renderChips() {
-    chipsEl.innerHTML = '';
-    photoState.tiles = sortTiles(photoState.tiles);
-    photoState.tiles.forEach((t, i) => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'tile-chip' + (isRed(t) ? ' is-red' : '');
-      chip.innerHTML = `${escapeText(displayName(t))}<span class="chip-x">✕</span>`;
-      chip.title = 'タップで削除';
-      chip.addEventListener('click', () => {
-        photoState.tiles.splice(i, 1);
-        renderChips();
-      });
-      chipsEl.appendChild(chip);
-    });
-  }
-
-  function showHandSection(tiles) {
-    photoState.tiles = sortTiles(tiles || []);
-    handSection.hidden = false;
-    renderChips();
-    resultArea.innerHTML = '';
-  }
-
-  function showPreview(blobOrUrl) {
-    try {
-      const url = typeof blobOrUrl === 'string' ? blobOrUrl : URL.createObjectURL(blobOrUrl);
-      previewImg.src = url;
-      previewWrap.hidden = false;
-    } catch { /* プレビューは任意 */ }
-  }
-
-  // 画像取得 → 認識
+  // 画像取得 → 認識 → 手入力ビルダーへ流し込む
   async function handleImage(blob) {
     showPreview(blob);
     setStatus('画像を認識しています…');
@@ -205,21 +145,19 @@ function setupPhoto() {
         fallbackToManualEntry('牌を認識できませんでした。');
         return;
       }
-      setStatus('認識しました。誤りがあればチップをタップして修正してください。');
-      showHandSection(tiles);
+      hb.loadTiles(tiles);
+      setStatus('認識しました。誤りがあれば牌をタップ/パレットで修正してください。');
     } catch (e) {
       fallbackToManualEntry(`認識に失敗しました（${e.message}）。`);
     }
   }
 
-  // 認識できない場合でも手入力で続行可能にする
+  // 認識できない場合でも手入力ビルダーで続行可能にする
   function fallbackToManualEntry(reason) {
     setStatus(
-      `${reason} ⚙設定 からAPIキーを設定するか、下の入力欄に手で牌を入力して計算できます。` +
-      '（手入力タブも利用できます）',
+      `${reason} ⚙設定 からAPIキーを設定するか、下のビルダーに手で牌を入力して計算できます。`,
       true,
     );
-    showHandSection(photoState.tiles);
   }
 
   // ボタン結線（capture.js の有無を実行時に確認）
@@ -252,25 +190,9 @@ function setupPhoto() {
     }
   });
 
-  // クイック追加（手修正用）
-  $('#photoQuickAddBtn').addEventListener('click', () => {
-    const input = $('#photoQuickInput');
-    const added = parseTileInput(input.value);
-    if (added.length) {
-      photoState.tiles = photoState.tiles.concat(added);
-      // 認識結果が無いまま手入力した場合もセクションを出す
-      handSection.hidden = false;
-      renderChips();
-    }
-    input.value = '';
-  });
-  $('#photoQuickInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); $('#photoQuickAddBtn').click(); }
-  });
-
-  // 得点表計算
-  $('#photoCalcBtn').addEventListener('click', async () => {
-    if (!photoState.tiles.length) {
+  // 全パターン列挙（和了牌・文脈の指定なしでも）
+  $('#enumerateBtn').addEventListener('click', async () => {
+    if (!hb.state.hand.length) {
       resultArea.innerHTML = '<div class="result-error">牌がありません。</div>';
       return;
     }
@@ -285,27 +207,21 @@ function setupPhoto() {
       return;
     }
 
+    // 文脈はビルダーの現在状態から組み立てる
     const ctx = {
-      ...getDefaultCtx(),
+      seatWind: hb.state.seatWind,
+      roundWind: hb.state.roundWind,
+      doraIndicators: [...hb.state.doraIndicators],
+      uraIndicators: [...hb.state.uraIndicators],
     };
     try {
-      const outcomes = enumerateOutcomes(photoState.tiles, ctx);
+      const outcomes = enumerateOutcomes(hb.state.hand, ctx);
       renderOutcomesTable(resultArea, outcomes);
     } catch (e) {
       resultArea.innerHTML =
         `<div class="result-error">計算でエラーが発生しました: ${escapeText(e.message)}</div>`;
     }
   });
-}
-
-// 写真フロー用の既定文脈（明示的指定が無い場合の既定値）
-function getDefaultCtx() {
-  return {
-    seatWind: '1z',
-    roundWind: '1z',
-    doraIndicators: [],
-    uraIndicators: [],
-  };
 }
 
 // 自前ファイル選択フォールバック
@@ -328,10 +244,8 @@ function escapeText(s) {
 // 起動
 // ---------------------------------------------------------------------------
 function init() {
-  setupTabs();
   setupSettings();
-  setupManual();
-  setupPhoto();
+  setupMain();
 }
 
 if (document.readyState === 'loading') {

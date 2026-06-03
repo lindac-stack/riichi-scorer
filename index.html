@@ -15,14 +15,11 @@
     <button id="settingsBtn" class="icon-btn" type="button" aria-label="設定">⚙ 設定</button>
   </header>
 
-  <nav class="tabs" role="tablist">
-    <button id="tabPhoto" class="tab" role="tab" aria-selected="false" type="button">写真で計算</button>
-    <button id="tabManual" class="tab is-active" role="tab" aria-selected="true" type="button">手入力で計算</button>
-  </nav>
-
   <main class="content">
-    <!-- 写真で計算 -->
-    <section id="panelPhoto" class="panel" role="tabpanel" hidden>
+    <!-- 写真から認識 → 手入力ビルダーで修正 → 計算 を1ページに統合 -->
+    <section id="panelMain" class="panel">
+      <!-- 写真から認識（任意） -->
+      <h2 class="section-title">写真から認識（任意）</h2>
       <div class="photo-controls">
         <button id="captureBtn" class="primary-btn" type="button">📷 撮影</button>
         <button id="pickBtn" class="secondary-btn" type="button">🖼 画像を選択</button>
@@ -32,24 +29,14 @@
       </div>
       <div id="photoStatus" class="status" role="status" aria-live="polite"></div>
 
-      <div id="photoHandSection" class="hand-section">
-        <h2 class="section-title">認識した牌（タップで削除・修正可）</h2>
-        <div id="photoHandChips" class="hand-chips" aria-live="polite"></div>
-        <div class="quick-add-row">
-          <input id="photoQuickInput" class="quick-input" type="text"
-                 inputmode="latin" placeholder="追加: 例 123m45p7z" />
-          <button id="photoQuickAddBtn" class="secondary-btn small" type="button">追加</button>
-        </div>
-        <button id="photoCalcBtn" class="primary-btn wide" type="button">得点表を計算</button>
-      </div>
-
-      <div id="photoResult" class="result-area" aria-live="polite"></div>
-    </section>
-
-    <!-- 手入力で計算 -->
-    <section id="panelManual" class="panel" role="tabpanel">
+      <!-- 手入力ビルダー（認識牌の修正もここで行う） -->
       <div id="handbuilder"></div>
-      <div id="manualResult" class="result-area" aria-live="polite"></div>
+
+      <!-- 全パターン列挙（和了牌・文脈の指定なしでも） -->
+      <button id="enumerateBtn" class="secondary-btn wide" type="button">全パターンを列挙（和了牌・文脈の指定なしでも）</button>
+
+      <!-- 計算結果 -->
+      <div id="result" class="result-area" aria-live="polite"></div>
     </section>
   </main>
 

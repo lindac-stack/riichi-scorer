@@ -12,3 +12,8 @@ node_modules/
 
 .playwright-mcp/
 probe.mjs
+
+# Secrets / local API keys (Vision testing) — never commit
+.env.local
+*.local
+test/fixtures/vision/*.key
