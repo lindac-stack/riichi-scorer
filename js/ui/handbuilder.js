@@ -31,6 +31,7 @@ export function createHandBuilder(root, onCalc) {
     flags: { riichi: false, doubleRiichi: false, ippatsu: false, menzen: true,
              rinshan: false, chankan: false, haitei: false, houtei: false,
              tenhou: false, chiihou: false },
+    melds: [],           // {type:'chi'|'pon'|'kan', tiles:string[], open:boolean}
     doraIndicators: [],
     uraIndicators: [],
   };
@@ -39,6 +40,11 @@ export function createHandBuilder(root, onCalc) {
     <h2 class="section-title">手牌</h2>
     <div id="hbHandChips" class="hand-chips" aria-live="polite"></div>
     <p class="field-note">チップをタップで和了牌に指定、もう一度で削除します。</p>
+
+    <div id="hbMeldsWrap" class="melds-wrap" hidden>
+      <span class="ctx-name">副露（鳴き）</span>
+      <div id="hbMelds" class="melds"></div>
+    </div>
 
     <div class="quick-add-row">
       <input id="hbQuick" class="quick-input" type="text" inputmode="latin"
@@ -222,13 +228,46 @@ export function createHandBuilder(root, onCalc) {
     });
   }
 
-  function setDoraFromText(text, key, chipsEl) {
-    const tiles = parseTileInput(text);
-    state[key] = tiles;
+  function renderDoraChips(tiles, chipsEl) {
     chipsEl.innerHTML = tiles.map((t) => {
       const cls = isRed(t) ? 'tile-chip is-red' : 'tile-chip';
       return `<span class="${cls}">${displayName(t)}</span>`;
     }).join('');
+  }
+  function setDoraFromText(text, key, chipsEl) {
+    const tiles = parseTileInput(text);
+    state[key] = tiles;
+    renderDoraChips(tiles, chipsEl);
+  }
+
+  const MELD_LABEL = { chi: 'チー', pon: 'ポン', kan: 'カン' };
+  function renderMelds() {
+    const wrap = $('#hbMeldsWrap');
+    const el = $('#hbMelds');
+    if (!state.melds.length) { wrap.hidden = true; el.innerHTML = ''; return; }
+    wrap.hidden = false;
+    el.innerHTML = '';
+    state.melds.forEach((m, i) => {
+      const group = document.createElement('div');
+      group.className = 'meld-group';
+      const tag = m.open ? (MELD_LABEL[m.type] || m.type) : '暗' + (MELD_LABEL[m.type] || m.type);
+      group.innerHTML =
+        `<span class="meld-tag">${tag}</span>` +
+        m.tiles.map((t) => `<span class="tile-chip${isRed(t) ? ' is-red' : ''}">${displayName(t)}</span>`).join('') +
+        `<button type="button" class="meld-del" title="この副露を削除">✕</button>`;
+      group.querySelector('.meld-del').addEventListener('click', () => {
+        state.melds.splice(i, 1);
+        recomputeMenzen();
+        renderMelds();
+      });
+      el.appendChild(group);
+    });
+  }
+  function recomputeMenzen() {
+    // 明らかな鳴き（open meld）があれば門前ではない
+    const hasOpen = state.melds.some((m) => m.open);
+    state.flags.menzen = !hasOpen;
+    syncFlags();
   }
 
   // ----- ワイヤリング -----
@@ -294,7 +333,7 @@ export function createHandBuilder(root, onCalc) {
     const payload = {
       hand: [...state.hand],
       winningTile,
-      melds: [],
+      melds: state.melds.map((m) => ({ ...m, tiles: [...m.tiles] })),
       winType: state.winType,
       seatWind: state.seatWind,
       roundWind: state.roundWind,
@@ -315,5 +354,32 @@ export function createHandBuilder(root, onCalc) {
     renderHand();
   }
 
-  return { state, loadTiles };
+  /** 副露をセット（写真の領域選択から）。open meld があれば門前を解除。 */
+  function setMelds(melds) {
+    state.melds = Array.isArray(melds)
+      ? melds.filter((m) => m && Array.isArray(m.tiles) && m.tiles.length)
+        .map((m) => ({ type: m.type || 'chi', tiles: [...m.tiles], open: m.open !== false }))
+      : [];
+    recomputeMenzen();
+    renderMelds();
+  }
+
+  /** ドラ表示牌をセット（写真の領域選択から）。 */
+  function setDora(tiles) {
+    state.doraIndicators = Array.isArray(tiles) ? [...tiles] : [];
+    renderDoraChips(state.doraIndicators, $('#hbDoraChips'));
+  }
+
+  /** 写真の領域認識結果をまとめて反映。append=true で手牌に追記。 */
+  function applyRecognition({ hand, melds, dora } = {}, { append = false } = {}) {
+    if (Array.isArray(hand)) {
+      state.hand = sortTiles(append ? [...state.hand, ...hand] : [...hand]);
+      state.winIndex = -1;
+      renderHand();
+    }
+    if (Array.isArray(melds)) setMelds(append ? [...state.melds, ...melds] : melds);
+    if (Array.isArray(dora)) setDora(append ? [...state.doraIndicators, ...dora] : dora);
+  }
+
+  return { state, loadTiles, setMelds, setDora, applyRecognition };
 }

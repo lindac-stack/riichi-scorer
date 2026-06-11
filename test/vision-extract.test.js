@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractTiles } from '../js/vision/recognize.js';
+import { extractTiles, voteTiles, extractBox } from '../js/vision/recognize.js';
 
 test('素の JSON をそのまま抽出できる', () => {
   const out = extractTiles('{"tiles": ["1m","2m","3m","1z","7z"]}');
@@ -59,4 +59,70 @@ test('null/空文字は空配列', () => {
 
 test('赤五 0m/0p/0s は有効、0z は無効', () => {
   assert.deepEqual(extractTiles('{"tiles":["0m","0p","0s","0z"]}'), ['0m', '0p', '0s']);
+});
+
+// ---- voteTiles（自己整合アンサンブル）----
+
+test('voteTiles: 単一runはそのまま', () => {
+  assert.deepEqual(voteTiles([['1m', '2m', '3m']]), ['1m', '2m', '3m']);
+});
+
+test('voteTiles: 過半数のrunに出た牌だけ採用（少数派は捨てる）', () => {
+  const runs = [
+    ['1m', '2m', '3m', '9p'],
+    ['1m', '2m', '3m'],
+    ['1m', '2m', '3m', '5s'], // 9p/5s は1回ずつ＝過半数未満で除外
+  ];
+  const out = voteTiles(runs).sort();
+  assert.deepEqual(out, ['1m', '2m', '3m']);
+});
+
+test('voteTiles: 枚数はパス間の中央値で決める', () => {
+  // 1z は [3,1,3] -> 中央値3枚、2回出現で過半数
+  const runs = [['1z', '1z', '1z'], ['1z'], ['1z', '1z', '1z']];
+  assert.deepEqual(voteTiles(runs), ['1z', '1z', '1z']);
+});
+
+test('voteTiles: 同一牌は最大4枚に切り詰める', () => {
+  const runs = [
+    ['7p', '7p', '7p', '7p', '7p', '7p'],
+    ['7p', '7p', '7p', '7p', '7p', '7p'],
+    ['7p', '7p', '7p', '7p', '7p', '7p'],
+  ];
+  assert.deepEqual(voteTiles(runs), ['7p', '7p', '7p', '7p']);
+});
+
+test('voteTiles: 空入力は空配列', () => {
+  assert.deepEqual(voteTiles([]), []);
+});
+
+// ---- extractBox（2パス認識 Pass 1）----
+
+test('extractBox: {"box":{x0..}} を抽出', () => {
+  assert.deepEqual(
+    extractBox('{"box": {"x0": 0.1, "y0": 0.4, "x1": 0.9, "y1": 0.7}}'),
+    { x0: 0.1, y0: 0.4, x1: 0.9, y1: 0.7 },
+  );
+});
+
+test('extractBox: コードフェンス/前後文があっても拾う', () => {
+  const t = 'Here:\n```json\n{"box":{"x0":0,"y0":0,"x1":1,"y1":1}}\n```';
+  assert.deepEqual(extractBox(t), { x0: 0, y0: 0, x1: 1, y1: 1 });
+});
+
+test('extractBox: {x,y,w,h} 形式に対応', () => {
+  assert.deepEqual(extractBox('{"x":0.2,"y":0.2,"w":0.5,"h":0.3}'),
+    { x0: 0.2, y0: 0.2, x1: 0.7, y1: 0.5 });
+});
+
+test('extractBox: 範囲外座標は [0,1] にクランプ', () => {
+  assert.deepEqual(extractBox('{"box":{"x0":-0.2,"y0":0.1,"x1":1.5,"y1":0.9}}'),
+    { x0: 0, y0: 0.1, x1: 1, y1: 0.9 });
+});
+
+test('extractBox: box:null / 退化した box / 非JSON は null', () => {
+  assert.equal(extractBox('{"box": null}'), null);
+  assert.equal(extractBox('{"box":{"x0":0.5,"y0":0.5,"x1":0.5,"y1":0.5}}'), null); // x1<=x0
+  assert.equal(extractBox('no json here'), null);
+  assert.equal(extractBox(''), null);
 });

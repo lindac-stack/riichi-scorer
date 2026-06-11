@@ -75,20 +75,12 @@ function getVisionConfig() {
 function setupMain() {
   const statusEl = $('#photoStatus');
   const previewWrap = $('#photoPreview');
-  const previewImg = $('#photoImg');
   const resultArea = $('#result');
+  let annotator = null; // 写真アノテーション・オーバーレイ（読み込み毎に再生成）
 
   function setStatus(msg, isError) {
     statusEl.textContent = msg || '';
     statusEl.classList.toggle('error', !!isError);
-  }
-
-  function showPreview(blobOrUrl) {
-    try {
-      const url = typeof blobOrUrl === 'string' ? blobOrUrl : URL.createObjectURL(blobOrUrl);
-      previewImg.src = url;
-      previewWrap.hidden = false;
-    } catch { /* プレビューは任意 */ }
   }
 
   // 手入力ビルダーを1度だけ生成。計算は従来の手入力フローと同じ。
@@ -119,36 +111,105 @@ function setupMain() {
     }
   });
 
-  // 画像取得 → 認識 → 手入力ビルダーへ流し込む
+  // 画像取得 → 写真の上で領域を手動選択 → 領域ごとに認識して手入力ビルダーへ
   async function handleImage(blob) {
-    showPreview(blob);
-    setStatus('画像を認識しています…');
+    setStatus('画像を準備しています…');
 
-    let recognizeTiles;
+    // 前処理（EXIF回転焼込み＋縮小）して正立 dataURL を得る
+    let dataUrl;
     try {
-      recognizeTiles = await loadVision();
-    } catch (e) {
-      fallbackToManualEntry('画像認識モジュールが利用できません。');
-      return;
+      const { preprocessImage } = await import('../vision/preprocess.js');
+      const pre = await preprocessImage(blob, { maxEdge: 1600 });
+      dataUrl = pre.dataUrl;
+    } catch {
+      dataUrl = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = () => rej(r.error || new Error('画像読み込み失敗'));
+        r.readAsDataURL(blob);
+      });
     }
 
+    // アノテーション・オーバーレイを描画（写真上で領域を手動選択）
+    try {
+      const { createAnnotator } = await import('../vision/annotate.js');
+      if (annotator && typeof annotator.destroy === 'function') annotator.destroy();
+      previewWrap.hidden = false;
+      previewWrap.innerHTML = '';
+      annotator = createAnnotator(previewWrap, dataUrl, { onRecognize: recognizeRegions });
+      setStatus('写真の上で「手牌」「副露」「ドラ表示」を四角く囲み、犬/人/山など不要部分は「消去」で塗り潰してから「選択を認識」を押してください。');
+    } catch (e) {
+      fallbackToManualEntry(`画像の表示に失敗しました（${e.message}）。下のビルダーで手入力できます。`);
+    }
+  }
+
+  // 副露の種別を推定（3枚同種=ポン / 3枚連番=チー / 4枚=カン）。
+  function inferMeld(tiles, normalize) {
+    const t = tiles.slice(0, 4);
+    if (t.length >= 4) return { type: 'kan', tiles: t.slice(0, 4), open: true };
+    if (t.length === 3) {
+      const n = t.map(normalize);
+      const same = n.every((x) => x === n[0]);
+      return { type: same ? 'pon' : 'chi', tiles: t, open: true };
+    }
+    return { type: 'chi', tiles: t, open: true }; // 2枚以下は暫定（後で手修正）
+  }
+
+  // 選択された領域を1つずつ切り出して認識し、手牌/副露/ドラに振り分ける
+  async function recognizeRegions(regions, cropRegion) {
     const cfg = getVisionConfig();
     if (!cfg.key) {
-      fallbackToManualEntry('APIキーが未設定です。');
+      fallbackToManualEntry('APIキーが未設定です。⚙設定 から入力するか、下のビルダーで手入力してください。');
       return;
     }
 
+    let recognizeTiles;
+    let normalize;
     try {
-      const res = await recognizeTiles(blob, cfg);
-      const tiles = Array.isArray(res) ? res : (res && res.tiles) || [];
-      if (!tiles.length) {
-        fallbackToManualEntry('牌を認識できませんでした。');
-        return;
+      recognizeTiles = await loadVision();
+      ({ normalize } = await import('../tiles.js'));
+    } catch {
+      fallbackToManualEntry('認識モジュールが利用できません。');
+      return;
+    }
+
+    const handR = regions.filter((r) => r.type === 'hand');
+    const meldR = regions.filter((r) => r.type === 'meld');
+    const doraR = regions.filter((r) => r.type === 'dora');
+    if (!handR.length && !meldR.length && !doraR.length) {
+      setStatus('認識する領域がありません。先に「手牌」などを囲んでください。', true);
+      return;
+    }
+
+    setStatus('選択領域を認識しています…');
+    const recog = async (r) => {
+      const url = cropRegion(r, { maxEdge: 1200 }); // 領域を切り出した dataURL
+      const res = await recognizeTiles(url, { ...cfg, preprocess: false, twoPass: false });
+      return (res && res.tiles) || [];
+    };
+
+    try {
+      const hand = [];
+      for (const r of handR) hand.push(...(await recog(r)));
+      const melds = [];
+      for (const r of meldR) {
+        const tiles = await recog(r);
+        if (tiles.length) melds.push(inferMeld(tiles, normalize));
       }
-      hb.loadTiles(tiles);
-      setStatus('認識しました。誤りがあれば牌をタップ/パレットで修正してください。');
+      const dora = [];
+      for (const r of doraR) dora.push(...(await recog(r)));
+
+      hb.applyRecognition({ hand, melds, dora });
+
+      const parts = [];
+      if (hand.length) parts.push(`手牌${hand.length}枚`);
+      if (melds.length) parts.push(`副露${melds.length}組`);
+      if (dora.length) parts.push(`ドラ表示${dora.length}枚`);
+      setStatus(
+        `認識結果 → ${parts.join(' / ') || 'なし'}。下のビルダーで誤りを修正し、和了牌を選んで計算してください。`,
+      );
     } catch (e) {
-      fallbackToManualEntry(`認識に失敗しました（${e.message}）。`);
+      setStatus(`認識に失敗しました（${e.message}）。下のビルダーで手入力できます。`, true);
     }
   }
 
@@ -211,6 +272,7 @@ function setupMain() {
     const ctx = {
       seatWind: hb.state.seatWind,
       roundWind: hb.state.roundWind,
+      melds: hb.state.melds.map((m) => ({ ...m, tiles: [...m.tiles] })),
       doraIndicators: [...hb.state.doraIndicators],
       uraIndicators: [...hb.state.uraIndicators],
     };

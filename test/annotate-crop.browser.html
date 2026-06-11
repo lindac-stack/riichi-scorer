@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<!--
+  annotate-crop.browser.html — 実ブラウザでアノテーション読取り＋切り出しを検証する手動テストハーネス。
+  なぜブラウザか: cropRegion / cropNormalizedBox は canvas drawImage の source-rect マッピングと
+  消去塗りに依存し、実ピクセルでしか正しさを確認できない（node の単体テストでは届かない）。
+
+  合成画像（4象限: 左上=赤 右上=緑 左下=青 右下=黄）を作り、
+   1) ドラッグを模擬して getRegions() が正規化座標を正しく読むか（= アノテーションが読まれる）
+   2) cropRegion / cropNormalizedBox が指定領域の中心ピクセルを正しい象限色で返すか（= 正しく切り出す）
+   3) 消去領域が felt 色で塗り潰されるか
+  を assert し、結果を window.__TEST_RESULTS__ と画面に出す。Playwright から読み取る。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>annotate / crop browser test</title>
+<style>
+  body { font: 14px -apple-system, sans-serif; margin: 16px; background:#fff; color:#111; }
+  #summary { font-size: 20px; font-weight: 700; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; }
+  #summary.pass { background:#e7f7ee; color:#176a3a; }
+  #summary.fail { background:#fdecec; color:#b01515; }
+  table { border-collapse: collapse; width: 100%; max-width: 820px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+  td.ok { color:#176a3a; font-weight:600; }
+  td.no { color:#b01515; font-weight:600; }
+  .detail { color:#555; font-family: ui-monospace, monospace; font-size: 12px; }
+  #stage { position:absolute; left:-9999px; top:0; width:360px; } /* off-screen host for annotator */
+</style>
+</head>
+<body>
+  <h1>アノテーション読取り＋切り出し 検証</h1>
+  <div id="summary">running…</div>
+  <table><thead><tr><th>#</th><th>テスト</th><th>結果</th><th>詳細</th></tr></thead><tbody id="rows"></tbody></table>
+  <div id="stage"></div>
+
+<script type="module">
+import { createAnnotator } from '../js/vision/annotate.js';
+import { cropNormalizedBox, preprocessImage } from '../js/vision/preprocess.js';
+
+// ---- 小さな assert フレームワーク ----
+const results = [];
+function record(name, ok, detail) { results.push({ name, ok: !!ok, detail: String(detail ?? '') }); }
+async function check(name, fn) {
+  try { const d = await fn(); record(name, true, d ?? 'ok'); }
+  catch (e) { record(name, false, e && e.message ? e.message : e); }
+}
+function assert(cond, msg) { if (!cond) throw new Error(msg || 'assert failed'); }
+const near = (a, b, tol) => Math.abs(a - b) <= tol;
+
+// ---- 合成画像: 400x200 を4象限に塗る ----
+const PALETTE = {
+  red:    [220, 30, 30],
+  green:  [30, 190, 60],
+  blue:   [40, 70, 220],
+  yellow: [230, 210, 40],
+  felt:   [47, 125, 82],   // #2f7d52 = cropRegion の消去塗り色
+};
+function makeSourceDataUrl() {
+  const c = document.createElement('canvas');
+  c.width = 400; c.height = 200;
+  const x = c.getContext('2d');
+  x.fillStyle = 'rgb(220,30,30)';  x.fillRect(0, 0, 200, 100);     // TL red
+  x.fillStyle = 'rgb(30,190,60)';  x.fillRect(200, 0, 200, 100);   // TR green
+  x.fillStyle = 'rgb(40,70,220)';  x.fillRect(0, 100, 200, 100);   // BL blue
+  x.fillStyle = 'rgb(230,210,40)'; x.fillRect(200, 100, 200, 100); // BR yellow
+  return c.toDataURL('image/png');
+}
+
+// dataURL の (nx,ny) 正規化位置のピクセル RGB を読む。
+function sampleAt(dataUrl, nx, ny) {
+  return new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = im.naturalWidth; c.height = im.naturalHeight;
+      const cx = c.getContext('2d');
+      cx.drawImage(im, 0, 0);
+      const px = Math.min(c.width - 1, Math.max(0, Math.round(nx * c.width)));
+      const py = Math.min(c.height - 1, Math.max(0, Math.round(ny * c.height)));
+      const d = cx.getImageData(px, py, 1, 1).data;
+      resolve([d[0], d[1], d[2], c.width, c.height]);
+    };
+    im.onerror = () => reject(new Error('crop dataURL の読み込みに失敗'));
+    im.src = dataUrl;
+  });
+}
+// 最近傍のパレット色名を返す（JPEG 圧縮のズレに頑健）。
+function nearestColor(rgb) {
+  let best = null, bd = Infinity;
+  for (const [name, c] of Object.entries(PALETTE)) {
+    const dd = (rgb[0]-c[0])**2 + (rgb[1]-c[1])**2 + (rgb[2]-c[2])**2;
+    if (dd < bd) { bd = dd; best = name; }
+  }
+  return best;
+}
+
+// ---- アノテータ準備 ----
+const host = document.getElementById('stage');
+const srcUrl = makeSourceDataUrl();
+const api = createAnnotator(host, srcUrl, {});
+const canvas = host.querySelector('.annot-canvas');
+// 内部 img の onload を待つ。canvas.width は未指定でも既定 300 になるため readiness 判定に使えない。
+// cropRegion は natW/natH(=画像ロード後に確定)に依存するので、成功するまでポーリングして待つ。
+await new Promise((res, rej) => {
+  const t0 = performance.now();
+  (function poll() {
+    try {
+      const u = api.cropRegion({ type: 'hand', x0: 0, y0: 0, x1: 1, y1: 1 });
+      if (typeof u === 'string' && u.length > 64) return res();
+    } catch { /* 画像未ロード → natW=0 → 再試行 */ }
+    if (performance.now() - t0 > 5000) return rej(new Error('annotator image load timeout'));
+    requestAnimationFrame(poll);
+  })();
+});
+
+// 正規化座標でドラッグを模擬（pointerdown→move→up）。
+function dragRegion(nx0, ny0, nx1, ny1) {
+  const rect = canvas.getBoundingClientRect();
+  const pt = (nx, ny) => ({ clientX: rect.left + nx * rect.width, clientY: rect.top + ny * rect.height });
+  const mk = (type, p) => new PointerEvent(type, { bubbles: true, pointerId: 1, ...p });
+  canvas.dispatchEvent(mk('pointerdown', pt(nx0, ny0)));
+  canvas.dispatchEvent(mk('pointermove', pt((nx0+nx1)/2, (ny0+ny1)/2)));
+  canvas.dispatchEvent(mk('pointermove', pt(nx1, ny1)));
+  canvas.dispatchEvent(mk('pointerup', pt(nx1, ny1)));
+}
+
+// ============================ テスト ============================
+
+// 1) アノテーションが読まれる: ドラッグした矩形が getRegions() に正規化座標で入る。
+await check('アノテーション読取り: ドラッグ矩形が正規化座標で記録される', async () => {
+  api.setMode('hand');
+  dragRegion(0.05, 0.05, 0.45, 0.45);
+  const rs = api.getRegions();
+  assert(rs.length === 1, `領域数=${rs.length}（期待1）`);
+  const r = rs[0];
+  assert(r.type === 'hand', `type=${r.type}`);
+  assert(near(r.x0, 0.05, 0.03) && near(r.y0, 0.05, 0.03) && near(r.x1, 0.45, 0.03) && near(r.y1, 0.45, 0.03),
+    `box=(${r.x0.toFixed(3)},${r.y0.toFixed(3)},${r.x1.toFixed(3)},${r.y1.toFixed(3)})`);
+  return `読取り box=(${r.x0.toFixed(3)},${r.y0.toFixed(3)},${r.x1.toFixed(3)},${r.y1.toFixed(3)}) type=${r.type}`;
+});
+
+// 2) 正しく切り出す: 各象限を cropRegion で切り出し、中心色が一致する（source-rect マッピング検証）。
+const quadrants = [
+  ['左上=赤',  { x0:0.05, y0:0.05, x1:0.45, y1:0.45 }, 'red'],
+  ['右上=緑',  { x0:0.55, y0:0.05, x1:0.95, y1:0.45 }, 'green'],
+  ['左下=青',  { x0:0.05, y0:0.55, x1:0.45, y1:0.95 }, 'blue'],
+  ['右下=黄',  { x0:0.55, y0:0.55, x1:0.95, y1:0.95 }, 'yellow'],
+];
+for (const [label, box, want] of quadrants) {
+  await check(`cropRegion 切り出し: ${label} の中心が ${want}`, async () => {
+    const url = api.cropRegion({ type: 'hand', ...box }, { maxEdge: 1200 });
+    assert(typeof url === 'string' && url.startsWith('data:image/jpeg'), 'jpeg dataURL ではない');
+    const [r, g, b, w, h] = await sampleAt(url, 0.5, 0.5);
+    const got = nearestColor([r, g, b]);
+    assert(got === want, `中心色=${got} rgb(${r},${g},${b}) 期待=${want}`);
+    return `crop=${w}x${h} 中心rgb(${r},${g},${b})→${got}`;
+  });
+}
+
+// 3) 切り出しが拡大される: 小さな領域は最大2倍拡大される（出力が元ピクセルより大きい）。
+await check('cropRegion 拡大: 小領域が2倍まで拡大される', async () => {
+  // 0.10幅×0.10高 = 元40x20px。maxEdge=1200, scale=min(2, 1200/maxEdge_src) → 2倍。
+  const url = api.cropRegion({ type: 'hand', x0: 0.10, y0: 0.10, x1: 0.20, y1: 0.20 }, { maxEdge: 1200 });
+  const [, , , w, h] = await sampleAt(url, 0.5, 0.5);
+  // marginFrac=0.06 込みでも おおむね元寸の~2倍。最低でも元寸より大きいこと。
+  assert(w >= 60 && h >= 30, `出力 ${w}x${h} が拡大されていない`);
+  return `出力 ${w}x${h}（元 ~45x25 を拡大）`;
+});
+
+// 4) 消去領域が felt 色で塗られる: hand 領域内に重ねた erase が切り出し結果で felt 色になる。
+await check('cropRegion 消去: erase 重畳部が felt 色で塗り潰される', async () => {
+  // 上半分全体を hand、その右側（緑象限）に erase を重ねる。
+  // 既存領域をクリアしてからドラッグで積む。
+  for (const b of host.querySelectorAll('[data-act="clear"]')) b.click();
+  api.setMode('hand');  dragRegion(0.05, 0.10, 0.95, 0.40); // 上半分 全幅
+  api.setMode('erase'); dragRegion(0.55, 0.10, 0.95, 0.40); // 右上(緑)に消去
+  const regs = api.getRegions();
+  const hand = regs.find((r) => r.type === 'hand');
+  const erase = regs.find((r) => r.type === 'erase');
+  assert(hand && erase, `hand/erase が積まれていない regs=${regs.length}`);
+  const url = api.cropRegion(hand, { maxEdge: 1200 });
+  // 左側(赤、消去なし)= red、右側(元緑だが消去)= felt
+  const left = await sampleAt(url, 0.2, 0.5);
+  const right = await sampleAt(url, 0.85, 0.5);
+  const lc = nearestColor(left), rc = nearestColor(right);
+  assert(lc === 'red', `左側=${lc} rgb(${left[0]},${left[1]},${left[2]}) 期待 red`);
+  assert(rc === 'felt', `右側=${rc} rgb(${right[0]},${right[1]},${right[2]}) 期待 felt(消去)`);
+  return `左=${lc} 右=${rc}（消去が felt 化）`;
+});
+
+// 5) preprocess.cropNormalizedBox（2パス認識 Pass2 の自動切り出し）も正しい象限を返す。
+await check('cropNormalizedBox 切り出し: 左下=青 の中心が blue', async () => {
+  const out = await cropNormalizedBox(srcUrl, { x0:0.05, y0:0.55, x1:0.45, y1:0.95 }, { maxEdge: 1200 });
+  assert(out && out.dataUrl, 'dataUrl が無い');
+  const [r, g, b, w, h] = await sampleAt(out.dataUrl, 0.5, 0.5);
+  const got = nearestColor([r, g, b]);
+  assert(got === 'blue', `中心色=${got} rgb(${r},${g},${b}) 期待 blue`);
+  return `crop=${w}x${h} 中心rgb(${r},${g},${b})→${got}`;
+});
+
+// 6) preprocessImage: EXIF/縮小前処理が適用され、長辺が maxEdge 以内に収まる。
+await check('preprocessImage: 適用され長辺が maxEdge 以内に縮小', async () => {
+  const big = document.createElement('canvas');
+  big.width = 2400; big.height = 1200;
+  big.getContext('2d').drawImage(await createImageBitmap(await (await fetch(srcUrl)).blob()), 0, 0, 2400, 1200);
+  const pre = await preprocessImage(big.toDataURL('image/png'), { maxEdge: 1000 });
+  assert(pre.applied === true, `applied=${pre.applied}`);
+  assert(Math.max(pre.width, pre.height) <= 1000, `長辺 ${Math.max(pre.width, pre.height)} > 1000`);
+  return `applied=${pre.applied} ${pre.width}x${pre.height}`;
+});
+
+// ============================ 集計・描画 ============================
+const passed = results.filter((r) => r.ok).length;
+const failed = results.length - passed;
+window.__TEST_RESULTS__ = { passed, failed, total: results.length, cases: results };
+
+const rows = document.getElementById('rows');
+results.forEach((r, i) => {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${i + 1}</td><td>${r.name}</td>` +
+    `<td class="${r.ok ? 'ok' : 'no'}">${r.ok ? 'PASS' : 'FAIL'}</td>` +
+    `<td class="detail">${r.detail}</td>`;
+  rows.appendChild(tr);
+});
+const sum = document.getElementById('summary');
+sum.className = failed === 0 ? 'pass' : 'fail';
+sum.textContent = failed === 0
+  ? `✅ 全 ${results.length} 件 PASS — アノテーションは正しく読み取られ、正しく切り出されています`
+  : `❌ ${failed} / ${results.length} 件 FAIL`;
+document.title = failed === 0 ? `PASS ${passed}/${results.length}` : `FAIL ${failed}/${results.length}`;
+</script>
+</body>
+</html>

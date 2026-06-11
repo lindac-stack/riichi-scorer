@@ -154,6 +154,54 @@ body {
 }
 .photo-preview img { display: block; width: 100%; height: auto; }
 
+.photo-tips {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.photo-tips summary { cursor: pointer; font-weight: 600; color: var(--text); }
+.photo-tips ul { margin: 8px 0 2px; padding-left: 1.2em; }
+.photo-tips li { margin: 3px 0; line-height: 1.45; }
+
+/* 写真アノテーション（領域の手動選択） */
+.annot { margin-top: 12px; }
+.annot-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.annot-mode {
+  font-size: 13px; padding: 7px 11px; border-radius: 999px;
+  border: 2px solid var(--c, var(--border)); background: var(--surface);
+  color: var(--text); min-height: 40px;
+}
+.annot-mode.is-on { background: var(--c, var(--accent)); color: #fff; border-color: var(--c, var(--accent)); }
+.annot-act {
+  font-size: 13px; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text); min-height: 40px;
+}
+.annot-recog { margin-left: auto; }
+.annot-sep { flex: 1 1 6px; }
+.annot-hint { font-size: 12.5px; color: var(--text-dim); margin: 8px 0; line-height: 1.45; }
+.annot-stage { width: 100%; }
+.annot-canvas {
+  display: block; max-width: 100%; touch-action: none;
+  border: 1px solid var(--border); border-radius: 10px; background: #000;
+}
+
+/* 副露（鳴き）表示 */
+.melds-wrap { margin: 10px 0; }
+.melds { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.meld-group {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 6px; border: 1px dashed var(--win-border); border-radius: 10px; background: var(--surface-2);
+}
+.meld-tag { font-size: 12px; font-weight: 700; color: var(--text-dim); padding: 0 4px; }
+.meld-del {
+  border: none; background: transparent; color: var(--danger);
+  font-size: 14px; cursor: pointer; padding: 0 4px; min-height: 32px;
+}
+
 .status {
   margin-top: 12px;
   color: var(--text-dim);
