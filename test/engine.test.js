@@ -250,6 +250,41 @@ test('10. ドラ/赤検証: 断么九+赤1+ドラ1 → 3翻40符 5200', () => {
   assert.strictEqual(r.points.ron, 5200);
 });
 
+// 12. 門前フラグの尊重: menzen:false で門前限定役（門前清自摸和/平和）が落ちること。
+//     副露が無くても「門前を外す」と非門前として採点される（手入力で開いた手を表現できる）。
+test('12. menzen:false で門前清自摸和・平和が外れる（門前トグルが効く）', () => {
+  const hand = ['2m', '3m', '4m', '5m', '6m', '7m', '2p', '3p', '4p', '7p', '8p', '9p', '3s', '3s'];
+  const closed = scoreHand(base({ hand, winningTile: '4m', winType: 'tsumo' }));
+  assert.strictEqual(closed.valid, true, closed.error || '');
+  const cn = closed.yaku.map((y) => y.name);
+  assert.ok(cn.includes('門前清自摸和'), cn.join(','));
+  assert.ok(cn.includes('平和'), cn.join(','));
+
+  // 門前を外す → 門前限定役は消える。この手は他に役が無いので役なし。
+  const open = scoreHand(base({ hand, winningTile: '4m', winType: 'tsumo', menzen: false }));
+  const on = open.yaku.map((y) => y.name);
+  assert.ok(!on.includes('門前清自摸和'), on.join(','));
+  assert.ok(!on.includes('平和'), on.join(','));
+});
+
+// 13. 四暗刻は門前限定: 11122233344455m を「門前」だとツモ四暗刻だが、
+//     門前を外す（鳴いた手）と四暗刻にならない（対々和・清一色 等）。
+test('13. 11122233344455m は門前ツモのみ四暗刻、非門前では役満にしない', () => {
+  const hand = ['1m', '1m', '1m', '2m', '2m', '2m', '3m', '3m', '3m', '4m', '4m', '4m', '5m', '5m'];
+
+  // 門前ツモ（既定）→ 四暗刻（役満）
+  const closed = scoreHand(base({ hand, winningTile: '1m', winType: 'tsumo' }));
+  assert.strictEqual(closed.valid, true, closed.error || '');
+  assert.strictEqual(closed.yakuman, 1, '門前ツモは四暗刻');
+  assert.ok(closed.yaku.map((y) => y.name).includes('四暗刻'));
+
+  // 門前を外す → 役満にならない（四暗刻不成立）
+  const open = scoreHand(base({ hand, winningTile: '1m', winType: 'tsumo', menzen: false }));
+  assert.strictEqual(open.valid, true, open.error || '');
+  assert.strictEqual(open.yakuman, 0, '非門前は四暗刻にならない');
+  assert.ok(!open.yaku.map((y) => y.name).includes('四暗刻'));
+});
+
 // 11. enumerateOutcomes が役なしを除外し降順で返すこと
 test('11. enumerateOutcomes 基本動作', () => {
   const outcomes = enumerateOutcomes(

@@ -37,8 +37,11 @@ export function scoreHand(input) {
 
   const isDealer = seatWind === '1z'; // 東家＝親
 
-  // 門前か（副露が1つでもあれば非門前。ただし暗槓は門前を崩さない）
-  const menzen = melds.every((m) => m.type === 'kan' && m.open === false);
+  // 門前か。開いた副露（ポン/チー/明槓）が1つでもあれば必ず非門前。暗槓は門前を崩さない。
+  // 開副露が無い場合は呼び出し側の menzen フラグを尊重する（手入力で「門前」を外せる）。
+  // enumerate など menzen 未指定（undefined）の経路では既定で門前扱い。
+  const hasOpenMeld = melds.some((m) => !(m.type === 'kan' && m.open === false));
+  const menzen = !hasOpenMeld && input.menzen !== false;
 
   // 和了牌が手牌に含まれているか軽くチェック（寛容）
   const { standard, chiitoitsu, kokushi } = decompose(hand, melds);
