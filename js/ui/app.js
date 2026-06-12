@@ -253,7 +253,9 @@ function setupMain() {
 
   // 全パターン列挙（和了牌・文脈の指定なしでも）
   $('#enumerateBtn').addEventListener('click', async () => {
-    if (!hb.state.hand.length) {
+    // タグから手牌/副露/ドラを導出（手牌と副露は1か所で管理）
+    const si = hb.getScoringInput();
+    if (!si.hand.length && !si.melds.length) {
       resultArea.innerHTML = '<div class="result-error">牌がありません。</div>';
       return;
     }
@@ -272,12 +274,13 @@ function setupMain() {
     const ctx = {
       seatWind: hb.state.seatWind,
       roundWind: hb.state.roundWind,
-      melds: hb.state.melds.map((m) => ({ ...m, tiles: [...m.tiles] })),
+      melds: si.melds,
+      taggedDora: si.taggedDora,
       doraIndicators: [...hb.state.doraIndicators],
       uraIndicators: [...hb.state.uraIndicators],
     };
     try {
-      const outcomes = enumerateOutcomes(hb.state.hand, ctx);
+      const outcomes = enumerateOutcomes(si.hand, ctx);
       renderOutcomesTable(resultArea, outcomes);
     } catch (e) {
       resultArea.innerHTML =

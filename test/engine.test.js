@@ -330,6 +330,20 @@ test('16. 非門前の暗刻4つ → 三暗刻を拾う', () => {
   assert.ok(r.yaku.map((y) => y.name).includes('三暗刻'), r.yaku.map((y) => y.name).join(','));
 });
 
+// 17. taggedDora（牌に直接付けたドラ印）が翻・ドラ数に加算される。
+test('17. taggedDora が翻に加算される', () => {
+  const h = {
+    hand: ['2m', '3m', '4m', '5m', '6m', '7m', '2p', '3p', '4p', '7p', '8p', '9p', '3s', '3s'],
+    winningTile: '4m',
+    winType: 'tsumo',
+  };
+  const noDora = scoreHand(base(h));
+  const withDora = scoreHand(base({ ...h, taggedDora: 2 }));
+  assert.strictEqual(noDora.valid, true, noDora.error || '');
+  assert.strictEqual(withDora.dora, noDora.dora + 2);
+  assert.strictEqual(withDora.han, noDora.han + 2);
+});
+
 // 11. enumerateOutcomes が役なしを除外し降順で返すこと
 test('11. enumerateOutcomes 基本動作', () => {
   const outcomes = enumerateOutcomes(

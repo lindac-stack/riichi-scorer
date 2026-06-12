@@ -47,6 +47,7 @@ export function enumerateOutcomes(tiles, ctx = {}) {
           roundWind,
           doraIndicators: ctx.doraIndicators || [],
           uraIndicators: ctx.uraIndicators || [],
+          taggedDora: ctx.taggedDora || 0,
           riichi: ctx.riichi || false,
           doubleRiichi: ctx.doubleRiichi || false,
           ippatsu: ctx.ippatsu || false,

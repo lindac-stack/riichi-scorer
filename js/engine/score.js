@@ -33,6 +33,7 @@ export function scoreHand(input) {
     houtei = false,
     tenhou = false,
     chiihou = false,
+    taggedDora = 0, // UI で牌に直接「ドラ」印を付けた枚数（表示牌からの算出に加算）
   } = input;
 
   const isDealer = seatWind === '1z'; // 東家＝親
@@ -67,7 +68,7 @@ export function scoreHand(input) {
 
   // ドラ/赤/裏の枚数（手牌全体 = hand + 副露牌）
   const fullTiles = [...hand, ...melds.flatMap((m) => m.tiles)];
-  const doraCount = countDora(fullTiles, doraIndicators);
+  const doraCount = countDora(fullTiles, doraIndicators) + (taggedDora || 0);
   const uraCount = (riichi || doubleRiichi) ? countDora(fullTiles, uraIndicators) : 0;
   const akaCount = fullTiles.filter((t) => isRed(t)).length;
   const extraDora = doraCount + uraCount + akaCount;

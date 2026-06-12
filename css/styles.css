@@ -189,23 +189,54 @@ body {
   border: 1px solid var(--border); border-radius: 10px; background: #000;
 }
 
-/* 副露（鳴き）表示 */
-.melds-wrap { margin: 10px 0; }
-.melds { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-.meld-group {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 4px 6px; border: 1px dashed var(--win-border); border-radius: 10px; background: var(--surface-2);
-}
-.meld-tag { font-size: 12px; font-weight: 700; color: var(--text-dim); padding: 0 4px; }
-.meld-del {
-  border: none; background: transparent; color: var(--danger);
-  font-size: 14px; cursor: pointer; padding: 0 4px; min-height: 32px;
-}
+/* ===== 牌の役割タグ（色）＋ ドラッグ用ブラシ ===== */
+:root { --role-called: #2f7df0; --role-dora: #1f9d57; }
 
-/* 副露・カンの追加コントロール */
-.meld-add { margin: 8px 0; }
-.meld-type { display: inline-flex; flex-wrap: wrap; margin-bottom: 8px; }
-.meld-type .seg-btn { font-size: 13px; }
+/* 手牌チップの役割表示（is-win は既存のゴールド枠を使用）。複数併用可。 */
+.tile-chip.is-called { box-shadow: inset 0 -5px 0 var(--role-called); border-color: var(--role-called); }
+.tile-chip.is-win.is-called { box-shadow: 0 0 0 2px var(--win-border), inset 0 -5px 0 var(--role-called); }
+.tile-chip.is-dora { position: relative; }
+.tile-chip.is-dora::after {
+  content: ''; position: absolute; top: 3px; right: 3px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--role-dora); box-shadow: 0 0 0 1.5px var(--surface);
+}
+.tile-chip.drop-target { outline: 2px dashed var(--accent); outline-offset: 1px; }
+
+/* ブラシ・ツールバー（ドラッグして牌へ / タップで選択） */
+.brush-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.brush {
+  font-size: 13px; font-weight: 600; padding: 8px 12px; min-height: 40px;
+  border-radius: 999px; border: 2px solid var(--border); background: var(--surface);
+  color: var(--text); cursor: grab; touch-action: none; user-select: none;
+}
+.brush.is-armed { box-shadow: 0 0 0 3px rgba(10,107,59,0.28); }
+.brush.b-win { border-color: var(--win-border); }
+.brush.b-win.is-armed { background: var(--win-bg); }
+.brush.b-called { border-color: var(--role-called); }
+.brush.b-called.is-armed { background: var(--role-called); color: #fff; }
+.brush.b-dora { border-color: var(--role-dora); }
+.brush.b-dora.is-armed { background: var(--role-dora); color: #fff; }
+.brush.b-clear { border-color: var(--text-dim); }
+.brush.b-del { border-color: var(--danger); color: var(--danger); }
+
+/* ドラッグ中の追従ゴースト */
+.brush-ghost {
+  position: fixed; z-index: 9999; transform: translate(-50%, -50%);
+  pointer-events: none; padding: 6px 10px; border-radius: 999px;
+  font-size: 13px; font-weight: 700; color: #fff; background: var(--accent);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3); opacity: 0.92;
+}
+.brush-ghost.b-win { background: var(--win-border); color: #3a2f00; }
+.brush-ghost.b-called { background: var(--role-called); }
+.brush-ghost.b-dora { background: var(--role-dora); }
+.brush-ghost.b-clear { background: #777; }
+.brush-ghost.b-del { background: var(--danger); }
+
+/* 凡例の色見本 */
+.lg-win { color: var(--win-border); }
+.lg-called { color: var(--role-called); }
+.lg-dora { color: var(--role-dora); }
 
 .status {
   margin-top: 12px;
