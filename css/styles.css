@@ -202,6 +202,11 @@ body {
   font-size: 14px; cursor: pointer; padding: 0 4px; min-height: 32px;
 }
 
+/* 副露・カンの追加コントロール */
+.meld-add { margin: 8px 0; }
+.meld-type { display: inline-flex; flex-wrap: wrap; margin-bottom: 8px; }
+.meld-type .seg-btn { font-size: 13px; }
+
 .status {
   margin-top: 12px;
   color: var(--text-dim);

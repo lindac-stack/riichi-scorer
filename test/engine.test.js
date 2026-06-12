@@ -285,6 +285,51 @@ test('13. 11122233344455m は門前ツモのみ四暗刻、非門前では役満
   assert.ok(!open.yaku.map((y) => y.name).includes('四暗刻'));
 });
 
+// 14. 暗槓込みの手が採点され、暗槓は門前を維持する（カンを宣言できる）。
+test('14. 暗槓込みの手が採点され門前を維持', () => {
+  const r = scoreHand(
+    base({
+      hand: ['2p', '3p', '4p', '5p', '6p', '7p', '2s', '3s', '4s', '9s', '9s'], // 11枚=3面子+雀頭
+      melds: [{ type: 'kan', tiles: ['1m', '1m', '1m', '1m'], open: false }], // 暗槓
+      winningTile: '4s',
+      winType: 'tsumo',
+    })
+  );
+  assert.strictEqual(r.valid, true, r.error || '');
+  assert.ok(r.yaku.map((y) => y.name).includes('門前清自摸和'), '暗槓は門前を維持');
+});
+
+// 15. 明槓は門前を崩す（門前清自摸和が付かない）。断么九で和了形は維持。
+test('15. 明槓は門前を崩す（断么九のみ）', () => {
+  const r = scoreHand(
+    base({
+      hand: ['3p', '4p', '5p', '6p', '7p', '8p', '2s', '3s', '4s', '5s', '5s'],
+      melds: [{ type: 'kan', tiles: ['2m', '2m', '2m', '2m'], open: true }], // 明槓
+      winningTile: '4s',
+      winType: 'tsumo',
+    })
+  );
+  assert.strictEqual(r.valid, true, r.error || '');
+  const names = r.yaku.map((y) => y.name);
+  assert.ok(!names.includes('門前清自摸和'), names.join(',')); // 非門前
+  assert.ok(names.includes('断么九'), names.join(','));
+});
+
+// 16. 非門前で暗刻4つ（門前を外した状態）でも三暗刻を拾う（ankouCount>=3）。
+test('16. 非門前の暗刻4つ → 三暗刻を拾う', () => {
+  const r = scoreHand(
+    base({
+      hand: ['1m', '1m', '1m', '2m', '2m', '2m', '3m', '3m', '3m', '4m', '4m', '4m', '5m', '5m'],
+      winningTile: '5m', // 単騎ロン
+      winType: 'ron',
+      menzen: false, // 門前を外す
+    })
+  );
+  assert.strictEqual(r.valid, true, r.error || '');
+  assert.strictEqual(r.yakuman, 0, '非門前は四暗刻にならない');
+  assert.ok(r.yaku.map((y) => y.name).includes('三暗刻'), r.yaku.map((y) => y.name).join(','));
+});
+
 // 11. enumerateOutcomes が役なしを除外し降順で返すこと
 test('11. enumerateOutcomes 基本動作', () => {
   const outcomes = enumerateOutcomes(

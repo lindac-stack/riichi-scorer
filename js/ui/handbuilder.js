@@ -41,8 +41,22 @@ export function createHandBuilder(root, onCalc) {
     <div id="hbHandChips" class="hand-chips" aria-live="polite"></div>
     <p class="field-note">チップをタップで和了牌に指定、もう一度で削除します。</p>
 
-    <div id="hbMeldsWrap" class="melds-wrap" hidden>
-      <span class="ctx-name">副露（鳴き）</span>
+    <div id="hbMeldsWrap" class="melds-wrap">
+      <span class="ctx-name">副露・カン（鳴き / 暗槓）</span>
+      <div class="meld-add">
+        <div class="seg meld-type" id="hbMeldType">
+          <button class="seg-btn is-on" data-v="pon" type="button">ポン</button>
+          <button class="seg-btn" data-v="chi" type="button">チー</button>
+          <button class="seg-btn" data-v="minkan" type="button">明カン</button>
+          <button class="seg-btn" data-v="ankan" type="button">暗カン</button>
+        </div>
+        <div class="quick-add-row">
+          <input id="hbMeldInput" class="quick-input" type="text" inputmode="latin"
+                 placeholder="ポン/チー=3枚 例 111p・123m / カン=4枚 例 5555s" />
+          <button id="hbMeldBtn" class="secondary-btn small" type="button">追加</button>
+        </div>
+        <p id="hbMeldNote" class="field-note">副露やカンはここで宣言します（手牌チップには入れず別枠で扱います）。暗カンは門前を維持します。</p>
+      </div>
       <div id="hbMelds" class="melds"></div>
     </div>
 
@@ -242,11 +256,12 @@ export function createHandBuilder(root, onCalc) {
 
   const MELD_LABEL = { chi: 'チー', pon: 'ポン', kan: 'カン' };
   function renderMelds() {
-    const wrap = $('#hbMeldsWrap');
     const el = $('#hbMelds');
-    if (!state.melds.length) { wrap.hidden = true; el.innerHTML = ''; return; }
-    wrap.hidden = false;
     el.innerHTML = '';
+    if (!state.melds.length) {
+      el.innerHTML = '<span class="field-note" style="margin:0">（副露・カンなし）</span>';
+      return;
+    }
     state.melds.forEach((m, i) => {
       const group = document.createElement('div');
       group.className = 'meld-group';
@@ -321,6 +336,52 @@ export function createHandBuilder(root, onCalc) {
     state.hand = [];
     state.winIndex = -1;
     renderHand();
+  });
+
+  // ----- 副露・カンの追加（手入力で鳴き/暗槓を宣言する）-----
+  let meldType = 'pon'; // 'pon' | 'chi' | 'minkan' | 'ankan'
+  function meldNote(msg, isError) {
+    const n = $('#hbMeldNote');
+    n.textContent = msg;
+    n.classList.toggle('error', !!isError);
+  }
+  $('#hbMeldType').querySelectorAll('.seg-btn').forEach((b) => {
+    b.addEventListener('click', () => { meldType = b.dataset.v; syncSeg($('#hbMeldType'), () => meldType); });
+  });
+  // チー判定: 同種・連続した3枚（赤五は normalize 済みで判定）。
+  function isChiSeq(norm) {
+    if (norm.length !== 3 || norm[0][1] === 'z') return false;
+    if (new Set(norm.map((t) => t[1])).size !== 1) return false;
+    const r = norm.map((t) => Number(t[0])).sort((a, b) => a - b);
+    return r[1] === r[0] + 1 && r[2] === r[1] + 1;
+  }
+  function addMeld() {
+    if (state.melds.length >= 4) return meldNote('副露・カンは最大4組までです。', true);
+    const tiles = parseTileInput($('#hbMeldInput').value);
+    if (!tiles.length) return meldNote('牌を入力してください（例 111p / 123m / 5555s）。', true);
+    const norm = tiles.map(normalize);
+    const allSame = norm.every((x) => x === norm[0]);
+    let meld;
+    if (meldType === 'pon') {
+      if (tiles.length !== 3 || !allSame) return meldNote('ポンは同じ牌3枚です（例 111p）。', true);
+      meld = { type: 'pon', tiles, open: true };
+    } else if (meldType === 'chi') {
+      if (!isChiSeq(norm)) return meldNote('チーは同種で連続した3枚です（例 123m）。', true);
+      meld = { type: 'chi', tiles, open: true };
+    } else { // minkan / ankan
+      if (tiles.length !== 4 || !allSame) return meldNote('カンは同じ牌4枚です（例 5555s）。', true);
+      meld = { type: 'kan', tiles, open: meldType === 'minkan' };
+    }
+    state.melds.push(meld);
+    recomputeMenzen();
+    renderMelds();
+    $('#hbMeldInput').value = '';
+    const label = meldType === 'ankan' ? '暗カン' : meldType === 'minkan' ? '明カン' : MELD_LABEL[meld.type];
+    meldNote(`${label}を追加しました。`, false);
+  }
+  $('#hbMeldBtn').addEventListener('click', addMeld);
+  $('#hbMeldInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addMeld(); }
   });
 
   $('#hbDoraBtn').addEventListener('click', () =>

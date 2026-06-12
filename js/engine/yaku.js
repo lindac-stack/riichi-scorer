@@ -215,8 +215,8 @@ export function detectStandardYaku(ctx) {
     yaku.push({ name: '対々和', han: 2 });
   }
 
-  // 三暗刻
-  if (ankouCount === 3) {
+  // 三暗刻（暗刻3つ。門前で暗刻4つは上で四暗刻になりここへ来ない＝非門前の暗刻4つも拾う）
+  if (ankouCount >= 3) {
     yaku.push({ name: '三暗刻', han: 2 });
   }
 
